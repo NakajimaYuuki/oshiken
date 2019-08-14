@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/2.2/ref/settings/
 import os
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
+import environ
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -37,6 +39,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'tweet',
+    'cms',
 ]
 
 MIDDLEWARE = [
@@ -50,6 +54,8 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = 'oshiken_django.urls'
+
+AUTH_USER_MODEL = 'cms.user'
 
 TEMPLATES = [
     {
@@ -118,3 +124,16 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/2.2/howto/static-files/
 
 STATIC_URL = '/static/'
+
+env = environ.Env()
+# reading .env file
+environ.Env.read_env()
+
+# False if not in os.environ
+DEBUG = env('DEBUG')
+
+
+CONSUMER_TOKEN = env('CONSUMER_TOKEN')
+CONSUMER_SECRET = env('CONSUMER_SECRET')
+ACCESS_TOKEN = env('ACCESS_TOKEN')
+ACCESS_SECRET = env('ACCESS_SECRET')

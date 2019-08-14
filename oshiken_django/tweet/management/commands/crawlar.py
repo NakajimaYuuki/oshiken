@@ -1,12 +1,17 @@
+import json
 from logging import getLogger
 from logging.handlers import BufferingHandler
 
+import requests
 import tweepy
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import BaseCommand
 from django.db import transaction
 import environ
+from oauthlib.oauth1.rfc5849.endpoints import access_token
 
-from tweet.models import TwitterUser, Tweet
+from oshiken_django import settings
+from tweet.models import TwitterUser, Tweet, Picture
 
 logger = getLogger(__name__)
 buffer_handler = BufferingHandler(capacity=1000000)
@@ -20,7 +25,8 @@ class Command(BaseCommand):
     @transaction.atomic
     def handle(self, *args, **options):
         api = _get_api()
-        for user in TwitterUser.objects.filter(is_target=True):
+        for user in TwitterUser.objects.filter(
+                is_target_user=True):
             try:
                 _get_tweets(user, api)
             except Exception as e:
@@ -28,41 +34,50 @@ class Command(BaseCommand):
 
 
 def _get_api():
-    env = environ.Env()
-    env.read_env('.env')
-
-    consumer_token = env('CONSUMER_TOKEN')
-    consumer_secret = env('CONSUMER_SECRET')
-    access_token = env('ACCESS_TOKEN')
-    access_secret = env('ACCESS_SECRET')
-
     # get from environment id
-    auth = tweepy.OAuthHandler(consumer_token, consumer_secret)
-    auth.set_access_token(access_token, access_secret)
+    ct = settings.CONSUMER_TOKEN
+    cs = settings.CONSUMER_SECRET
+    at = settings.ACCESS_TOKEN
+    acs = settings.ACCESS_SECRET
+    auth = tweepy.OAuthHandler(ct, cs)
+    auth.set_access_token(at, acs)
     return tweepy.API(auth)
 
 
-def _get_tweets(user, api):
+def _get_tweets(tweet_user, api):
 
-    for status in tweepy.Cursor(
-            api.user_timeline(id=user.twitter_user_id,
-                              tweet_mode='extended',
-                              since_id=user.since_id)).items():
-        _set_status(user, status)
+    param = {'id': tweet_user.twitter_user_id, 'tweet_mode': 'extended', }
+    if tweet_user.max_id:
+        param['max_id'] = tweet_user.max_id
+
+    res = api.user_timeline(**param)
+
+    for status in res:
+        _set_status(tweet_user, status)
 
 
 def _set_status(tweet_user, status):
-    tweet_id = status['id']
 
     try:
-        defaults = {'created_at': status['created_at'],
-                    'text': status['text'],
-                    }
-        tweet = Tweet.objects.update_or_create(
-            user=tweet_user,
-            tweet_id=tweet_id,
-            defaults=defaults)
+        _create_status(tweet_user, status)
 
     except Exception as e:
         logger.error(f'user:{tweet_user.twitter_user_id}, '
                      f'status:{status["id"]}')
+
+
+def _create_status(tweet_user, status):
+    defaults = {'created_at': status.created_at,
+                'text': status.full_text,
+                }
+    tweet, _ = Tweet.objects.update_or_create(
+        user=tweet_user,
+        tweet_id=status.id,
+        defaults=defaults)
+
+    for media in status.entities.get('media', []):
+        # downloadしてupload
+        Picture.create_image_from_url(media['media_url'])
+
+
+
