@@ -11,7 +11,7 @@ import environ
 from oauthlib.oauth1.rfc5849.endpoints import access_token
 
 from oshiken_django import settings
-from tweet.models import TwitterUser, Tweet, Picture
+from tweet.models import TwitterUser, Tweet, Picture, Mention
 
 logger = getLogger(__name__)
 buffer_handler = BufferingHandler(capacity=1000000)
@@ -24,60 +24,60 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **options):
-        api = _get_api()
+        get_tweet = GetTweet()
         for user in TwitterUser.objects.filter(
                 is_target_user=True):
             try:
-                _get_tweets(user, api)
+                get_tweet.get_tweets(user)
             except Exception as e:
                 logger.error(f'{user.id}-Error:{e.args}')
 
 
-def _get_api():
-    # get from environment id
-    ct = settings.CONSUMER_TOKEN
-    cs = settings.CONSUMER_SECRET
-    at = settings.ACCESS_TOKEN
-    acs = settings.ACCESS_SECRET
-    auth = tweepy.OAuthHandler(ct, cs)
-    auth.set_access_token(at, acs)
-    return tweepy.API(auth)
+class GetTweet():
 
+    def __init__(self):
+        # get from environment id
+        ct = settings.CONSUMER_TOKEN
+        cs = settings.CONSUMER_SECRET
+        at = settings.ACCESS_TOKEN
+        acs = settings.ACCESS_SECRET
+        auth = tweepy.OAuthHandler(ct, cs)
+        auth.set_access_token(at, acs)
+        self.api = tweepy.API(auth)
 
-def _get_tweets(tweet_user, api):
+    def get_tweets(self, tweet_user):
 
-    param = {'id': tweet_user.twitter_user_id, 'tweet_mode': 'extended', }
-    if tweet_user.max_id:
-        param['max_id'] = tweet_user.max_id
+        param = {'id': tweet_user.twitter_user_id, 'tweet_mode': 'extended', }
+        if tweet_user.max_id:
+            param['max_id'] = tweet_user.max_id
 
-    res = api.user_timeline(**param)
+        res = self.api.user_timeline(**param)
 
-    for status in res:
-        _set_status(tweet_user, status)
+        for status in res:
+            self.set_status(tweet_user, status)
 
+    def set_status(self, tweet_user, status):
 
-def _set_status(tweet_user, status):
+        try:
+            # 先にメンションを作る
+            mention = Mention.creat_mention(status)
+            tweet = Tweet.create_tweet(tweet_user, status.id,
+                                       status.created_at, status.full_text,
+                                       mention
+                                       )
+            # create pictures
+            for media in status.entities.get('media', []):
+                # video or picture?
+                try:
+                    pic = Picture.objects.get(
+                        image_original_url=media['media_url'])
+                except Picture.DoesNotExist:
+                    pic = Picture.create_image_from_url(
+                        media['media_id'],
+                        media['media_url'])
+                tweet.images.add(pic)
+            # create hash tag
 
-    try:
-        _create_status(tweet_user, status)
-
-    except Exception as e:
-        logger.error(f'user:{tweet_user.twitter_user_id}, '
-                     f'status:{status["id"]}')
-
-
-def _create_status(tweet_user, status):
-    defaults = {'created_at': status.created_at,
-                'text': status.full_text,
-                }
-    tweet, _ = Tweet.objects.update_or_create(
-        user=tweet_user,
-        tweet_id=status.id,
-        defaults=defaults)
-
-    for media in status.entities.get('media', []):
-        # downloadしてupload
-        Picture.create_image_from_url(media['media_url'])
-
-
-
+        except Exception as e:
+            logger.error(f'user:{tweet_user.twitter_user_id}, '
+                         f'status:{status["id"]}')
