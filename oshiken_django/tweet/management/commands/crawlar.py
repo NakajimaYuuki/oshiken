@@ -11,22 +11,23 @@ import environ
 from oauthlib.oauth1.rfc5849.endpoints import access_token
 
 from oshiken_django import settings
-from tweet.models import TwitterUser, Tweet, Picture, Mention
+from tweet.models import TwitterUser, Tweet, Picture, Mention, Hashtag, Video
 
 logger = getLogger(__name__)
 buffer_handler = BufferingHandler(capacity=1000000)
 logger.addHandler(buffer_handler)
 
+logger = getLogger('crawlar')
+
 
 class Command(BaseCommand):
 
-    help = 'Crate a superuser, and allow password to be provided'
+    help = 'collect_tweet'
 
-    @transaction.atomic
     def handle(self, *args, **options):
         get_tweet = GetTweet()
         for user in TwitterUser.objects.filter(
-                is_target_user=True):
+                is_target=True):
             try:
                 get_tweet.get_tweets(user)
             except Exception as e:
@@ -47,7 +48,7 @@ class GetTweet():
 
     def get_tweets(self, tweet_user):
 
-        param = {'id': tweet_user.twitter_user_id, 'tweet_mode': 'extended', }
+        param = {'id': tweet_user.user_id, 'tweet_mode': 'extended', }
         if tweet_user.max_id:
             param['max_id'] = tweet_user.max_id
 
@@ -56,28 +57,33 @@ class GetTweet():
         for status in res:
             self.set_status(tweet_user, status)
 
+    @transaction.atomic
     def set_status(self, tweet_user, status):
 
-        try:
-            # 先にメンションを作る
-            mention = Mention.creat_mention(status)
-            tweet = Tweet.create_tweet(tweet_user, status.id,
-                                       status.created_at, status.full_text,
-                                       mention
-                                       )
-            # create pictures
-            for media in status.entities.get('media', []):
-                # video or picture?
+        # 先にメンションを作る
+        mention = Mention.creat_mention(status)
+        # tweet 本体を作る
+        tweet = Tweet.create_tweet(tweet_user, status.id,
+                                   status.created_at, status.full_text,
+                                   mention
+                                   )
+        # create pictures
+        for media in status.entities.get('media', []):
+            # video or picture?
+            if media.get('type', 'XXX') == 'video':
+                logger.info(f'{status.id} has video')
+                video = Video.create_video_from_url(media['video_info']['variants'][0]['url'])
+            else:
                 try:
                     pic = Picture.objects.get(
                         image_original_url=media['media_url'])
                 except Picture.DoesNotExist:
                     pic = Picture.create_image_from_url(
-                        media['media_id'],
+                        media['id'],
                         media['media_url'])
                 tweet.images.add(pic)
-            # create hash tag
-
-        except Exception as e:
-            logger.error(f'user:{tweet_user.twitter_user_id}, '
-                         f'status:{status["id"]}')
+        # create hash tag
+        for in_hashtag in status.entities.get('hashtags', []):
+            hashtag, _ = Hashtag.objects.get_or_create(name=in_hashtag['text'])
+            tweet.hashtags.add(hashtag)
+        return None

@@ -1,3 +1,4 @@
+import datetime
 import os
 from urllib.request import urlopen
 
@@ -9,32 +10,25 @@ from django.db.models import Max, Min
 
 
 class TwitterUser(models.Model):
-    twitter_user_id = models.BigIntegerField(unique=True, db_index=True)
+    user_id = models.BigIntegerField(unique=True, db_index=True)
     screen_name = models.CharField(max_length=255, unique=False)
-    is_target_user = models.BooleanField(default=False)
+    is_target = models.BooleanField(default=False)
 
     def __str__(self):
         return self.screen_name
 
     @property
-    def since_id(self):
-        since_id = self.tweets.aggregate(since_id=Min('tweet_id'))['since_id']
-        if since_id:
-            return since_id
-        return 1
-
-    @property
     def max_id(self):
-        max_id = self.tweets.aggregate(max_id=Max('tweet_id'))['max_id']
-        if max_id:
-            return max_id
-        return
+        min_id = self.tweets.aggregate(min_id=Min('tweet_id'))['min_id']
+        if min_id:
+            return min_id
+        return None
 
     @staticmethod
     def create_user(user_info):
         defaults = {'screen_name': user_info['screen_name']}
         mention_user, _ = TwitterUser.objects.get_or_create(
-            twitter_user_id=user_info['id'],
+            user_id=user_info['id'],
             defaults=defaults)
         return mention_user
 
@@ -47,16 +41,19 @@ class Tweet(models.Model):
     text = models.TextField(null=True)
     retweet_id = models.BigIntegerField(null=True)
 
+    mention = models.ForeignKey('Mention', related_name='tweets',
+                                null=True, on_delete=models.SET_NULL)
+
     images = models.ManyToManyField('Picture', related_name='tweets')
     videos = models.ManyToManyField('Video', related_name='tweets')
-    mention = models.ForeignKey('Mention', related_name='tweets', on_delete=models.SET_NULL)
-    hash_tags = models.ManyToManyField('Hashtag', related_name='tweets')
+    hashtags = models.ManyToManyField('Hashtag', related_name='tweets')
 
     def __str__(self):
         return f'{self.user}-{self.text[:20]}'
 
     @staticmethod
     def create_tweet(tweet_user, status_id,  created_at, full_text, mention=None):
+        created_at = created_at.astimezone(datetime.timezone.utc)
         defaults = {'created_at': created_at,
                     'text': full_text,
                     'mention': mention
@@ -69,24 +66,24 @@ class Tweet(models.Model):
 
 
 class Mention(models.Model):
-    mention_users = models.ManyToManyField('TwitterUser',
+    twitter_users = models.ManyToManyField('TwitterUser',
                                            related_name='mention_tweets')
     in_reply_to_status_id = models.BigIntegerField(null=True)
 
     @staticmethod
     def creat_mention(status):
 
-        mention_users = []
+        twitter_users = []
         for user_mention in status.entities.get('user_mentions', []):
-            mention_user = TwitterUser.create_user(user_mention)
-            mention_users.append(mention_user)
+            twitter_user = TwitterUser.create_user(user_mention)
+            twitter_users.append(twitter_user)
 
-        if not mention_users:
+        if not twitter_users:
             return None
         mention, _ = Mention.objects.get_or_create(
             in_reply_to_status_id=status.in_reply_to_status_id)
 
-        mention.mention_users.set(**mention_users)
+        mention.twitter_users.set(twitter_users)
         return mention
 
 
@@ -100,18 +97,40 @@ class Picture(models.Model):
         root, ext = os.path.splitext(image_url)
         file_name = root.split('/')[-1]
 
-        picture = Picture(media_id=media_id, image_original_url=image_url)
-        img_temp = NamedTemporaryFile(delete=True)
-        img_temp.write(urlopen(image_url).read())
-        img_temp.flush()
-        picture.image.save(file_name, File(img_temp))
-        return None
+        defaults = {'image_original_url': image_url}
+        picture, _ = Picture.objects.get_or_create(
+            media_id=media_id,
+            defaults=defaults)
+        if not picture.image:
+            img_temp = NamedTemporaryFile(delete=True)
+            img_temp.write(urlopen(image_url).read())
+            img_temp.flush()
+            picture.image.save(file_name+ext, File(img_temp))
+            picture.save()
+        return picture
 
 
 class Video(models.Model):
-    video_url = models.FileField(upload_to='files')
+    video = models.FileField(upload_to='videos')
     video_original_url = models.URLField(null=True)
+
+    @staticmethod
+    def create_video_from_url(file_url):
+        root, ext = os.path.splitext(file_url)
+        file_name = root.split('/')[-1]
+
+        video, _ = Video.objects.get_or_create(video_original_url=file_url)
+        if not video.video:
+            img_temp = NamedTemporaryFile(delete=True)
+            img_temp.write(urlopen(file_url).read())
+            img_temp.flush()
+            video.video.save(file_name+ext, File(img_temp))
+            video.save()
+        return video
 
 
 class Hashtag(models.Model):
-    hash_tag = models.CharField(max_length=140)
+    name = models.CharField(max_length=140, unique=True)
+
+    def __str__(self):
+        return self.name

@@ -13,8 +13,16 @@ https://docs.djangoproject.com/en/2.2/ref/settings/
 import os
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
+from sys import stdout
+
 import environ
 
+env = environ.Env()
+# reading .env file
+environ.Env.read_env()
+
+# False if not in os.environ
+DEBUG = env('DEBUG')
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -25,8 +33,6 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SECRET_KEY = 'zto(epa+%j0)@y6)i2uc34^v*c91)5j!_zm26#o79)-3h=*7=('
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
-
 ALLOWED_HOSTS = []
 
 
@@ -41,6 +47,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'tweet',
     'cms',
+    'storages',
 ]
 
 MIDDLEWARE = [
@@ -79,12 +86,7 @@ WSGI_APPLICATION = 'oshiken_django.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/2.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': os.path.join(BASE_DIR, 'db.sqlite3'),
-    }
-}
+DATABASES = {'default': env.db()}
 
 
 # Password validation
@@ -119,21 +121,64 @@ USE_L10N = True
 
 USE_TZ = True
 
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'filters': {
+        'require_debug_false': {
+            '()': 'django.utils.log.RequireDebugFalse',
+        },
+        'require_debug_true': {
+            '()': 'django.utils.log.RequireDebugTrue',
+        },
+    },
+    'formatters': {
+        'simple': {
+            'format': '%(asctime)s %(levelname)s %(message)s'
+        },
+        'verbose': {
+            'format': '%(asctime)s [%(levelname)s] [%(name)s] [%(module)s] %(message)s'
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': 'DEBUG',
+            'formatter': 'simple',
+            'class': 'logging.StreamHandler',
+            'stream': stdout,
+        },
+        'crawlar_logging': {
+            'level': 'INFO',
+            'formatter': 'verbose',
+            'class': 'logging.StreamHandler',
+            'stream': stdout,
+        },
+    },
+    'loggers': {
+        'crawlar': {
+            'handlers': ['crawlar_logging'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+    }
+}
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/2.2/howto/static-files/
 
 STATIC_URL = '/static/'
 
-env = environ.Env()
-# reading .env file
-environ.Env.read_env()
-
-# False if not in os.environ
-DEBUG = env('DEBUG')
-
+ENV = 'locale'
 
 CONSUMER_TOKEN = env('CONSUMER_TOKEN')
 CONSUMER_SECRET = env('CONSUMER_SECRET')
 ACCESS_TOKEN = env('ACCESS_TOKEN')
 ACCESS_SECRET = env('ACCESS_SECRET')
+
+# for upload S3 user
+AWS_QUERYSTRING_AUTH = False
+AWS_ACCESS_KEY_ID = env('AWS_ACCESS_KEY_ID')
+AWS_SECRET_ACCESS_KEY = env('AWS_SECRET_ACCESS_KEY')
+AWS_STORAGE_BUCKET_NAME = env('AWS_STORAGE_BUCKET_NAME')
+DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+AWS_DEFAULT_ACL = True

@@ -3,9 +3,9 @@
     "model": "tweet.twitteruser",
     "pk": 1,
     "fields": {
-      "twitter_user_id": 2781258870,
+      "user_id": 2781258870,
       "screen_name": "ttk_philosophy",
-      "is_target_user": true
+      "is_target": true
     }
   }
 ]
