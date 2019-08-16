@@ -1,0 +1,12 @@
+[
+  {
+    "model": "tweet.twitteruser",
+    "pk": 1,
+    "fields": {
+      "user_id": 2781258870,
+      "screen_name": "ttk_philosophy",
+      "is_target": true
+    }
+  }
+]
+
